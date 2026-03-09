@@ -101,7 +101,18 @@ contract WithdrawalContract is Ownable, ReentrancyGuard {
             nullifier,
             withdrawalsRoot_
         );
+
+        // Transfer native ETH to the user
+        // For MVP: assetId 1 = native ETH on this chain
+        (bool success, ) = payable(withdrawalData.user).call{value: withdrawalData.amount}("");
+        require(success, "ETH transfer failed");
     }
+
+    /// @notice Receive ETH to fund withdrawals
+    receive() external payable {}
+
+    /// @notice Allow owner to fund contract for withdrawals
+    fallback() external payable {}
 
     /**
      * @notice Update withdrawals root (called by sequencer after block submission)

@@ -1,0 +1,8 @@
+{
+  "chainName": "Ethereum Sepolia",
+  "chainId": 11155111,
+  "deployer": "0x5a2730f477f1a2d916D4740225DfC7c748523346",
+  "deposit": "0x4E059D94012d494fBcFfC89C2E6ee4Ea853cA92F",
+  "verifier": "0x6eaE425A7830349F7716b8AaF8ff5e76E5c6d6a2",
+  "withdrawal": "0x2a1e5D09490b61ca9E745ebdE4AF103165b72892"
+}
