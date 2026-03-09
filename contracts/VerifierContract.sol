@@ -23,7 +23,7 @@ contract VerifierContract is Ownable, ReentrancyGuard {
 
     event SequencerUpdated(address indexed oldSequencer, address indexed newSequencer);
 
-    /// Current state root (Merkle root of ZKClear state)
+    /// Current state root (Merkle root of Axync state)
     bytes32 public stateRoot;
 
     /// Sequencer address (only sequencer can submit proofs)

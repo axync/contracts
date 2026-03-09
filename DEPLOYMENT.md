@@ -1,4 +1,4 @@
-# ZKClear Contracts Deployment Guide
+# Axync Contracts Deployment Guide
 
 ## Quick Start for Testing
 

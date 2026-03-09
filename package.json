@@ -1,7 +1,7 @@
 {
-  "name": "zkclear-contracts",
+  "name": "axync-contracts",
   "version": "0.1.0",
-  "description": "ZKClear smart contracts for deposits and withdrawals",
+  "description": "Axync smart contracts for deposits and withdrawals",
   "main": "index.js",
   "scripts": {
     "compile": "hardhat compile",
@@ -17,7 +17,7 @@
     "verify": "hardhat verify"
   },
   "keywords": [
-    "zkclear",
+    "axync",
     "smart-contracts",
     "deposit",
     "withdrawal"

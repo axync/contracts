@@ -6,7 +6,7 @@ import "./libraries/Pairing.sol";
 /**
  * @title Groth16Verifier
  * @notice Verifies Groth16 proofs on BN254 curve
- * @dev This contract verifies Groth16 proofs for ZKClear block state transitions
+ * @dev This contract verifies Groth16 proofs for Axync block state transitions
  */
 contract Groth16Verifier {
     using Pairing for *;

@@ -4,7 +4,7 @@
 const { deployContracts } = require("./deploy-helpers");
 
 async function main() {
-  console.log("=== Deploying ZKClear Contracts to Testnet ===\n");
+  console.log("=== Deploying Axync Contracts to Testnet ===\n");
 
   const deployment = await deployContracts();
 

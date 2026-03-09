@@ -3,7 +3,7 @@
 const hre = require("hardhat");
 
 /**
- * Deploy all ZKClear contracts to the current network
+ * Deploy all Axync contracts to the current network
  * @returns {Promise<Object>} Deployment addresses and metadata
  */
 async function deployContracts() {
