@@ -30,12 +30,23 @@ contract Groth16Verifier {
     using Pairing for Pairing.G2Point;
 
     VerifyingKey public vk;
+    address public owner;
 
     event VerifyingKeySet();
 
     error InvalidVerifyingKey();
     error InvalidPublicInputs();
     error InvalidProof();
+    error OnlyOwner();
+
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert OnlyOwner();
+        _;
+    }
+
+    constructor() {
+        owner = msg.sender;
+    }
 
     /**
      * @notice Set the verifying key
@@ -51,7 +62,7 @@ contract Groth16Verifier {
         Pairing.G2Point memory _gamma,
         Pairing.G2Point memory _delta,
         Pairing.G1Point[] memory _gamma_abc
-    ) external {
+    ) external onlyOwner {
         // Verify that gamma_abc has correct length
         // In Groth16, gamma_abc length = number of public inputs + 1 (constant term)
         // We have 24 public inputs (3 roots * 8 elements each) + 1 constant = 25

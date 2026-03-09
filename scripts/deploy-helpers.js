@@ -64,6 +64,11 @@ async function deployContracts() {
   const withdrawalAddress = await withdrawalContract.getAddress();
   console.log("WithdrawalContract deployed to:", withdrawalAddress);
 
+  // Set WithdrawalContract address on VerifierContract for access control
+  const setWithdrawalTx = await verifierContract.setWithdrawalContract(withdrawalAddress);
+  await setWithdrawalTx.wait();
+  console.log("VerifierContract: WithdrawalContract address set to:", withdrawalAddress);
+
   return {
     chainId,
     deployer: deployer.address,

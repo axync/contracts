@@ -58,7 +58,6 @@ contract DepositContract is Ownable, ReentrancyGuard {
     function depositNative(uint256 assetId) external payable nonReentrant {
         // Security: Input validation
         require(msg.value > 0, "Amount must be greater than 0");
-        require(assetId > 0, "Invalid asset ID");
         require(msg.sender != address(0), "Invalid sender");
         require(assetAddresses[assetId] == address(0), "Use ERC20 deposit for this asset");
         

@@ -35,13 +35,18 @@ contract VerifierContract is Ownable, ReentrancyGuard {
     /// Mapping of nullifiers to prevent double-spending withdrawals
     mapping(bytes32 => bool) public nullifiers;
 
+    /// Authorized WithdrawalContract address
+    address public withdrawalContract;
+
     error InvalidSequencerAddress();
     error OnlySequencer();
+    error OnlyWithdrawalContract();
     error InvalidProof();
     error BlockAlreadyProcessed();
     error InvalidStateRoot();
     error InvalidBlockId();
     error VerifierNotSet();
+    error InvalidAddress();
 
     modifier onlySequencer() {
         if (msg.sender != sequencer) revert OnlySequencer();
@@ -214,16 +219,25 @@ contract VerifierContract is Ownable, ReentrancyGuard {
      * @param nullifier Nullifier to mark as used
      */
     function markNullifierUsed(bytes32 nullifier) external {
-        // Only WithdrawalContract can call this
-        // TODO: Add access control for WithdrawalContract addresses
+        if (msg.sender != withdrawalContract) revert OnlyWithdrawalContract();
         nullifiers[nullifier] = true;
     }
 
     /**
-     * @notice Set sequencer address
+     * @notice Set the authorized WithdrawalContract address
+     * @param _withdrawalContract Address of the WithdrawalContract
+     */
+    function setWithdrawalContract(address _withdrawalContract) external onlyOwner {
+        if (_withdrawalContract == address(0)) revert InvalidAddress();
+        withdrawalContract = _withdrawalContract;
+    }
+
+    /**
+     * @notice Set sequencer address (callable by current sequencer or owner)
      * @param _sequencer New sequencer address
      */
-    function setSequencer(address _sequencer) external onlySequencer {
+    function setSequencer(address _sequencer) external {
+        if (msg.sender != sequencer && msg.sender != owner()) revert OnlySequencer();
         if (_sequencer == address(0)) revert InvalidSequencerAddress();
         address oldSequencer = sequencer;
         sequencer = _sequencer;
@@ -243,7 +257,7 @@ contract VerifierContract is Ownable, ReentrancyGuard {
      * @param _groth16Verifier Address of Groth16Verifier contract
      */
     function setGroth16Verifier(address _groth16Verifier) external onlyOwner {
-        if (_groth16Verifier == address(0)) revert InvalidSequencerAddress();
+        if (_groth16Verifier == address(0)) revert InvalidAddress();
         groth16Verifier = Groth16Verifier(_groth16Verifier);
     }
 
