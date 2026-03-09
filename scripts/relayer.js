@@ -157,11 +157,11 @@ async function processNewBlocks() {
   try {
     const currentBlockId = await fetchCurrentBlockId();
 
-    if (currentBlockId <= lastSubmittedBlockId) {
+    if (currentBlockId <= lastSubmittedBlockId + 1) {
       return; // No new blocks
     }
 
-    console.log(`\n🔄 New blocks detected: ${lastSubmittedBlockId + 1} → ${currentBlockId}`);
+    console.log(`\n🔄 New blocks detected: ${lastSubmittedBlockId + 1} → ${currentBlockId - 1}`);
 
     // Track prevStateRoot across blocks
     // For the very first block, prevStateRoot = bytes32(0)
@@ -176,7 +176,7 @@ async function processNewBlocks() {
       }
     }
 
-    for (let blockId = lastSubmittedBlockId + 1; blockId <= currentBlockId; blockId++) {
+    for (let blockId = lastSubmittedBlockId + 1; blockId < currentBlockId; blockId++) {
       const block = await fetchBlock(blockId);
       if (!block) {
         console.log(`  Block ${blockId} not found in storage, skipping`);
