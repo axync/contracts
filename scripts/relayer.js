@@ -3,7 +3,7 @@
  *
  * Polls the sequencer API for new blocks and submits their proofs
  * to VerifierContracts on both Sepolia and Base Sepolia.
- * Also updates WithdrawalContract.withdrawalsRoot when blocks contain withdrawals.
+ * Also updates AxyncVault.withdrawalsRoot when blocks contain withdrawals.
  *
  * Usage: node scripts/relayer.js
  */
@@ -34,7 +34,7 @@ const VERIFIER_ABI = [
   "function sequencer() view returns (address)",
 ];
 
-const WITHDRAWAL_ABI = [
+const VAULT_ABI = [
   "function updateWithdrawalsRoot(bytes32 newWithdrawalsRoot) external",
   "function withdrawalsRoot() view returns (bytes32)",
 ];
@@ -42,13 +42,13 @@ const WITHDRAWAL_ABI = [
 // --- Chain Connections ---
 const chains = {};
 
-function initChain(name, rpcUrl, verifierAddr, withdrawalAddr) {
+function initChain(name, rpcUrl, verifierAddr, vaultAddr) {
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
   const verifier = new ethers.Contract(verifierAddr, VERIFIER_ABI, wallet);
-  const withdrawal = new ethers.Contract(withdrawalAddr, WITHDRAWAL_ABI, wallet);
+  const vault = new ethers.Contract(vaultAddr, VAULT_ABI, wallet);
 
-  chains[name] = { provider, wallet, verifier, withdrawal, name };
+  chains[name] = { provider, wallet, verifier, vault, name };
   return chains[name];
 }
 
@@ -140,7 +140,7 @@ async function submitBlockProofToChain(chain, blockId, prevStateRoot, newStateRo
       const wdGasOpts = await getGasOpts(chain.provider, 100000);
       const wdNonce = await chain.provider.getTransactionCount(chain.wallet.address);
       console.log(`  [${chain.name}] Updating withdrawalsRoot (nonce ${wdNonce})...`);
-      const wdTx = await chain.withdrawal.updateWithdrawalsRoot(withdrawalsRoot, { ...wdGasOpts, nonce: wdNonce });
+      const wdTx = await chain.vault.updateWithdrawalsRoot(withdrawalsRoot, { ...wdGasOpts, nonce: wdNonce });
       await wdTx.wait();
       console.log(`  [${chain.name}] ✅ WithdrawalsRoot updated`);
     }
@@ -237,13 +237,13 @@ async function main() {
     "Sepolia",
     process.env.SEPOLIA_RPC || "https://ethereum-sepolia-rpc.publicnode.com",
     deployment.sepolia.verifier,
-    deployment.sepolia.withdrawal
+    deployment.sepolia.vault
   );
   initChain(
     "Base Sepolia",
     process.env.BASE_SEPOLIA_RPC || "https://sepolia.base.org",
     deployment.baseSepolia.verifier,
-    deployment.baseSepolia.withdrawal
+    deployment.baseSepolia.vault
   );
 
   // Verify connections

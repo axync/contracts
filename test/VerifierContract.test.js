@@ -160,7 +160,7 @@ describe("VerifierContract", function () {
     it("Should revert if verifier address is zero", async function () {
       await expect(
         verifierContract.setGroth16Verifier(ethers.ZeroAddress)
-      ).to.be.revertedWithCustomError(verifierContract, "InvalidSequencerAddress");
+      ).to.be.revertedWithCustomError(verifierContract, "InvalidAddress");
     });
   });
 
@@ -170,12 +170,22 @@ describe("VerifierContract", function () {
       expect(await verifierContract.isNullifierUsed(nullifier)).to.be.false;
     });
 
-    it("Should mark nullifier as used", async function () {
+    it("Should allow vault contract to mark nullifier as used", async function () {
       const nullifier = ethers.keccak256(ethers.toUtf8Bytes("test"));
 
+      // Set deployer as vault contract so it can call markNullifierUsed
+      await verifierContract.setVaultContract(deployer.address);
       await verifierContract.markNullifierUsed(nullifier);
 
       expect(await verifierContract.isNullifierUsed(nullifier)).to.be.true;
+    });
+
+    it("Should reject non-vault from marking nullifier", async function () {
+      const nullifier = ethers.keccak256(ethers.toUtf8Bytes("test"));
+
+      await expect(
+        verifierContract.connect(sequencer).markNullifierUsed(nullifier)
+      ).to.be.revertedWithCustomError(verifierContract, "OnlyVaultContract");
     });
   });
 
@@ -193,11 +203,11 @@ describe("VerifierContract", function () {
       expect(await verifierContract.sequencer()).to.equal(newSequencerAddress);
     });
 
-    it("Should revert if called by non-sequencer", async function () {
-      const [newSequencer] = await ethers.getSigners();
+    it("Should revert if called by non-sequencer and non-owner", async function () {
+      const [, , thirdParty] = await ethers.getSigners();
 
       await expect(
-        verifierContract.connect(deployer).setSequencer(newSequencer.address)
+        verifierContract.connect(thirdParty).setSequencer(thirdParty.address)
       ).to.be.revertedWithCustomError(verifierContract, "OnlySequencer");
     });
   });

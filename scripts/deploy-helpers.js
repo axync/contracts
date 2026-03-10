@@ -9,16 +9,16 @@ const hre = require("hardhat");
 async function deployContracts() {
   const chainId = await hre.ethers.provider.getNetwork().then((n) => Number(n.chainId));
   const signers = await hre.ethers.getSigners();
-  
+
   if (!signers || signers.length === 0) {
     throw new Error(
       "No signers found! Please set PRIVATE_KEY in .env file.\n" +
       "Example: PRIVATE_KEY=0x1234567890abcdef..."
     );
   }
-  
+
   const [deployer] = signers;
-  
+
   if (!deployer) {
     throw new Error(
       "Deployer account not found! Please set PRIVATE_KEY in .env file.\n" +
@@ -29,13 +29,6 @@ async function deployContracts() {
   console.log(`Deploying to chain ID: ${chainId}`);
   console.log("Deploying contracts with account:", deployer.address);
   console.log("Account balance:", (await hre.ethers.provider.getBalance(deployer.address)).toString());
-
-  // Deploy DepositContract
-  const DepositContract = await hre.ethers.getContractFactory("DepositContract");
-  const depositContract = await DepositContract.deploy();
-  await depositContract.waitForDeployment();
-  const depositAddress = await depositContract.getAddress();
-  console.log("DepositContract deployed to:", depositAddress);
 
   // Deploy Groth16Verifier (can be set later with verifying key)
   const Groth16Verifier = await hre.ethers.getContractFactory("Groth16Verifier");
@@ -57,30 +50,28 @@ async function deployContracts() {
   const verifierAddress = await verifierContract.getAddress();
   console.log("VerifierContract deployed to:", verifierAddress);
 
-  // Deploy WithdrawalContract
-  const WithdrawalContract = await hre.ethers.getContractFactory("WithdrawalContract");
-  const withdrawalContract = await WithdrawalContract.deploy(verifierAddress, deployer.address);
-  await withdrawalContract.waitForDeployment();
-  const withdrawalAddress = await withdrawalContract.getAddress();
-  console.log("WithdrawalContract deployed to:", withdrawalAddress);
+  // Deploy AxyncVault (unified deposit + withdrawal)
+  const AxyncVault = await hre.ethers.getContractFactory("AxyncVault");
+  const vault = await AxyncVault.deploy(verifierAddress, deployer.address);
+  await vault.waitForDeployment();
+  const vaultAddress = await vault.getAddress();
+  console.log("AxyncVault deployed to:", vaultAddress);
 
-  // Set WithdrawalContract address on VerifierContract for access control
-  const setWithdrawalTx = await verifierContract.setWithdrawalContract(withdrawalAddress);
-  await setWithdrawalTx.wait();
-  console.log("VerifierContract: WithdrawalContract address set to:", withdrawalAddress);
+  // Set AxyncVault address on VerifierContract for access control
+  const setVaultTx = await verifierContract.setVaultContract(vaultAddress);
+  await setVaultTx.wait();
+  console.log("VerifierContract: AxyncVault address set to:", vaultAddress);
 
   return {
     chainId,
     deployer: deployer.address,
-    depositAddress,
+    vaultAddress,
     groth16VerifierAddress,
     verifierAddress,
-    withdrawalAddress,
     contracts: {
-      deposit: depositContract,
+      vault,
       groth16Verifier: groth16Verifier,
       verifier: verifierContract,
-      withdrawal: withdrawalContract,
     },
   };
 }
@@ -98,28 +89,16 @@ async function verifyContracts(deployment) {
   console.log("\nWaiting for block confirmations...");
   const { contracts } = deployment;
 
-  if (contracts.deposit.deploymentTransaction()) {
-    await contracts.deposit.deploymentTransaction().wait(5);
+  if (contracts.vault.deploymentTransaction()) {
+    await contracts.vault.deploymentTransaction().wait(5);
   }
   if (contracts.verifier.deploymentTransaction()) {
     await contracts.verifier.deploymentTransaction().wait(5);
-  }
-  if (contracts.withdrawal.deploymentTransaction()) {
-    await contracts.withdrawal.deploymentTransaction().wait(5);
   }
 
   console.log("\nVerifying contracts on block explorer...");
 
   const initialStateRoot = hre.ethers.ZeroHash;
-
-  try {
-    await hre.run("verify:verify", {
-      address: deployment.depositAddress,
-      constructorArguments: [],
-    });
-  } catch (error) {
-    console.log("Error verifying DepositContract:", error.message);
-  }
 
   try {
     await hre.run("verify:verify", {
@@ -141,11 +120,11 @@ async function verifyContracts(deployment) {
 
   try {
     await hre.run("verify:verify", {
-      address: deployment.withdrawalAddress,
+      address: deployment.vaultAddress,
       constructorArguments: [deployment.verifierAddress, deployment.deployer],
     });
   } catch (error) {
-    console.log("Error verifying WithdrawalContract:", error.message);
+    console.log("Error verifying AxyncVault:", error.message);
   }
 }
 
@@ -153,4 +132,3 @@ module.exports = {
   deployContracts,
   verifyContracts,
 };
-

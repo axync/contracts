@@ -35,12 +35,12 @@ contract VerifierContract is Ownable, ReentrancyGuard {
     /// Mapping of nullifiers to prevent double-spending withdrawals
     mapping(bytes32 => bool) public nullifiers;
 
-    /// Authorized WithdrawalContract address
-    address public withdrawalContract;
+    /// Authorized AxyncVault address
+    address public vaultContract;
 
     error InvalidSequencerAddress();
     error OnlySequencer();
-    error OnlyWithdrawalContract();
+    error OnlyVaultContract();
     error InvalidProof();
     error BlockAlreadyProcessed();
     error InvalidStateRoot();
@@ -219,17 +219,17 @@ contract VerifierContract is Ownable, ReentrancyGuard {
      * @param nullifier Nullifier to mark as used
      */
     function markNullifierUsed(bytes32 nullifier) external {
-        if (msg.sender != withdrawalContract) revert OnlyWithdrawalContract();
+        if (msg.sender != vaultContract) revert OnlyVaultContract();
         nullifiers[nullifier] = true;
     }
 
     /**
-     * @notice Set the authorized WithdrawalContract address
-     * @param _withdrawalContract Address of the WithdrawalContract
+     * @notice Set the authorized AxyncVault address
+     * @param _vaultContract Address of the AxyncVault
      */
-    function setWithdrawalContract(address _withdrawalContract) external onlyOwner {
-        if (_withdrawalContract == address(0)) revert InvalidAddress();
-        withdrawalContract = _withdrawalContract;
+    function setVaultContract(address _vaultContract) external onlyOwner {
+        if (_vaultContract == address(0)) revert InvalidAddress();
+        vaultContract = _vaultContract;
     }
 
     /**

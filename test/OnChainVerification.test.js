@@ -9,38 +9,33 @@ describe("On-Chain Verification", function () {
     const [owner, sequencer] = await ethers.getSigners();
 
     // Deploy contracts
-    const DepositContract = await ethers.getContractFactory("DepositContract");
-    const depositContract = await DepositContract.deploy();
-    await depositContract.waitForDeployment();
-
     const Groth16Verifier = await ethers.getContractFactory("Groth16Verifier");
     const groth16Verifier = await Groth16Verifier.deploy();
     await groth16Verifier.waitForDeployment();
 
     const VerifierContract = await ethers.getContractFactory("VerifierContract");
     const initialStateRoot = ethers.ZeroHash;
-    // Use zero address for groth16Verifier to enable placeholder verification in gas tests
-    // This allows testing gas costs without requiring verifying key setup
     const verifierContract = await VerifierContract.deploy(
       sequencer.address,
       initialStateRoot,
       owner.address,
-      ethers.ZeroAddress // Use placeholder verification for gas tests
+      ethers.ZeroAddress
     );
     await verifierContract.waitForDeployment();
 
-    const WithdrawalContract = await ethers.getContractFactory("WithdrawalContract");
-    const withdrawalContract = await WithdrawalContract.deploy(
+    const AxyncVault = await ethers.getContractFactory("AxyncVault");
+    const vault = await AxyncVault.deploy(
       await verifierContract.getAddress(),
       owner.address
     );
-    await withdrawalContract.waitForDeployment();
+    await vault.waitForDeployment();
+
+    await verifierContract.connect(owner).setVaultContract(await vault.getAddress());
 
     return {
-      depositContract,
+      vault,
       groth16Verifier,
       verifierContract,
-      withdrawalContract,
       owner,
       sequencer,
     };
