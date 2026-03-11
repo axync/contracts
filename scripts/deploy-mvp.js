@@ -164,7 +164,7 @@ async function main() {
   console.log("\nDeployment complete! Now:");
   console.log("1. Clear backend data: rm -rf core/data/");
   console.log("2. Restart backend: cd core && cargo run --release -p axync-api");
-  console.log("3. Start relayer: cd contracts && node scripts/relayer.js");
+  console.log("3. Start relayer: cd relayer && node relayer.js");
   console.log("4. Start UI: cd ui && npm run dev");
 }
 
