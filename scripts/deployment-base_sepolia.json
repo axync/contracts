@@ -1,8 +1,0 @@
-{
-  "chainName": "Base Sepolia",
-  "chainId": 84532,
-  "deployer": "0x5a2730f477f1a2d916D4740225DfC7c748523346",
-  "deposit": "0x807d220AC80c59aC9F8C6C3d86211F04D80b9c53",
-  "verifier": "0x53743f261a8941Edb71973F1Ae98C69D7a6dBDda",
-  "withdrawal": "0xC0659E7a7b4E81AFe607A7aECd57A7E8E23Ba164"
-}
