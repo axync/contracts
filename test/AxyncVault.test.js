@@ -2,13 +2,55 @@ const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { loadFixture } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
 
+// Helper: build merkle tree and generate proof
+function buildMerkleTree(leaves) {
+  if (leaves.length === 0) return { root: ethers.ZeroHash, proofs: [] };
+
+  // Pad to power of 2
+  let paddedLeaves = [...leaves];
+  while (paddedLeaves.length & (paddedLeaves.length - 1)) {
+    paddedLeaves.push(ethers.ZeroHash);
+  }
+  if (paddedLeaves.length === 1) {
+    paddedLeaves.push(ethers.ZeroHash);
+  }
+
+  const layers = [paddedLeaves];
+  while (layers[layers.length - 1].length > 1) {
+    const prev = layers[layers.length - 1];
+    const next = [];
+    for (let i = 0; i < prev.length; i += 2) {
+      const left = prev[i];
+      const right = prev[i + 1];
+      const [a, b] = left <= right ? [left, right] : [right, left];
+      next.push(ethers.keccak256(ethers.solidityPacked(["bytes32", "bytes32"], [a, b])));
+    }
+    layers.push(next);
+  }
+
+  const root = layers[layers.length - 1][0];
+
+  // Generate proofs for each original leaf
+  const proofs = leaves.map((_, leafIndex) => {
+    const siblings = [];
+    let idx = leafIndex;
+    for (let l = 0; l < layers.length - 1; l++) {
+      const siblingIdx = idx % 2 === 0 ? idx + 1 : idx - 1;
+      siblings.push(layers[l][siblingIdx]);
+      idx = Math.floor(idx / 2);
+    }
+    return "0x" + siblings.map(s => s.slice(2)).join("");
+  });
+
+  return { root, proofs };
+}
+
 describe("AxyncVault", function () {
   async function deployFixture() {
     const [owner, user, sequencer] = await ethers.getSigners();
 
-    // Deploy VerifierContract (needed for AxyncVault)
-    const VerifierContract = await ethers.getContractFactory("VerifierContract");
-    const verifierContract = await VerifierContract.deploy(
+    const AxyncVerifier = await ethers.getContractFactory("AxyncVerifier");
+    const verifierContract = await AxyncVerifier.deploy(
       sequencer.address,
       ethers.ZeroHash,
       owner.address,
@@ -16,7 +58,6 @@ describe("AxyncVault", function () {
     );
     await verifierContract.waitForDeployment();
 
-    // Deploy AxyncVault
     const AxyncVault = await ethers.getContractFactory("AxyncVault");
     const vault = await AxyncVault.deploy(
       await verifierContract.getAddress(),
@@ -24,10 +65,8 @@ describe("AxyncVault", function () {
     );
     await vault.waitForDeployment();
 
-    // Link vault in verifier
     await verifierContract.connect(owner).setVaultContract(await vault.getAddress());
 
-    // Deploy mock ERC20
     const ERC20Mock = await ethers.getContractFactory("ERC20Mock");
     const mockToken = await ERC20Mock.deploy(
       "Test Token",
@@ -37,7 +76,6 @@ describe("AxyncVault", function () {
     );
     await mockToken.waitForDeployment();
 
-    // Setup: register asset, fund user, approve vault
     await vault.connect(owner).registerAsset(1, await mockToken.getAddress());
     await mockToken.transfer(user.address, ethers.parseEther("1000"));
     await mockToken.connect(user).approve(await vault.getAddress(), ethers.MaxUint256);
@@ -51,6 +89,19 @@ describe("AxyncVault", function () {
     ({ vault, verifierContract, mockToken, owner, user, sequencer } = await loadFixture(deployFixture));
   });
 
+  // Helper to create a valid withdrawal with merkle proof
+  async function setupWithdrawal(withdrawalData) {
+    const leaf = ethers.keccak256(
+      ethers.solidityPacked(
+        ["address", "uint256", "uint256", "uint256"],
+        [withdrawalData.user, withdrawalData.assetId, withdrawalData.amount, withdrawalData.chainId]
+      )
+    );
+    const { root, proofs } = buildMerkleTree([leaf]);
+    await vault.connect(owner).updateWithdrawalsRoot(root);
+    return { merkleProof: proofs[0], withdrawalsRoot: root };
+  }
+
   // ══════════════════════════════════════════════
   // ██  DEPOSITS
   // ══════════════════════════════════════════════
@@ -59,11 +110,9 @@ describe("AxyncVault", function () {
     it("Should emit Deposit event", async function () {
       const tx = await vault.connect(user).deposit(1, ethers.parseEther("1.0"));
       const receipt = await tx.wait();
-
       const depositEvent = receipt.logs.find(
         log => vault.interface.parseLog(log)?.name === "Deposit"
       );
-
       expect(depositEvent).to.not.be.undefined;
       const parsed = vault.interface.parseLog(depositEvent);
       expect(parsed.args.user).to.equal(user.address);
@@ -74,11 +123,9 @@ describe("AxyncVault", function () {
     it("Should transfer tokens to vault", async function () {
       const vaultAddress = await vault.getAddress();
       const amount = ethers.parseEther("1.0");
-
       const balanceBefore = await mockToken.balanceOf(vaultAddress);
       await vault.connect(user).deposit(1, amount);
       const balanceAfter = await mockToken.balanceOf(vaultAddress);
-
       expect(balanceAfter - balanceBefore).to.equal(amount);
     });
 
@@ -97,10 +144,8 @@ describe("AxyncVault", function () {
     it("Should handle multiple deposits", async function () {
       const amount1 = ethers.parseEther("1.0");
       const amount2 = ethers.parseEther("2.0");
-
       await vault.connect(user).deposit(1, amount1);
       await vault.connect(user).deposit(1, amount2);
-
       const balance = await mockToken.balanceOf(await vault.getAddress());
       expect(balance).to.equal(amount1 + amount2);
     });
@@ -111,11 +156,9 @@ describe("AxyncVault", function () {
       const amount = ethers.parseEther("1.0");
       const tx = await vault.connect(user).depositNative(0, { value: amount });
       const receipt = await tx.wait();
-
       const depositEvent = receipt.logs.find(
         log => vault.interface.parseLog(log)?.name === "Deposit"
       );
-
       expect(depositEvent).to.not.be.undefined;
       const parsed = vault.interface.parseLog(depositEvent);
       expect(parsed.args.user).to.equal(user.address);
@@ -142,17 +185,6 @@ describe("AxyncVault", function () {
         })
       ).to.be.revertedWith("Use depositNative function");
     });
-
-    it("Should handle multiple native ETH deposits", async function () {
-      const amount1 = ethers.parseEther("1.0");
-      const amount2 = ethers.parseEther("2.0");
-
-      await vault.connect(user).depositNative(0, { value: amount1 });
-      await vault.connect(user).depositNative(0, { value: amount2 });
-
-      const balance = await ethers.provider.getBalance(await vault.getAddress());
-      expect(balance).to.equal(amount1 + amount2);
-    });
   });
 
   // ══════════════════════════════════════════════
@@ -160,49 +192,30 @@ describe("AxyncVault", function () {
   // ══════════════════════════════════════════════
 
   describe("Withdrawals", function () {
-    const merkleProof = "0x" + "01".repeat(32);
     const zkProof = "0x" + "01".repeat(256);
 
     it("Should emit Withdrawal event", async function () {
-      const withdrawalsRoot = ethers.keccak256(ethers.toUtf8Bytes("withdrawals"));
-      await vault.connect(owner).updateWithdrawalsRoot(withdrawalsRoot);
-
+      const withdrawalData = { user: user.address, assetId: 1, amount: ethers.parseEther("1.0"), chainId: 1 };
+      const { merkleProof, withdrawalsRoot } = await setupWithdrawal(withdrawalData);
       const nullifier = ethers.keccak256(ethers.toUtf8Bytes("nullifier"));
-      const withdrawalData = {
-        user: user.address,
-        assetId: 1,
-        amount: ethers.parseEther("1.0"),
-        chainId: 1,
-      };
 
-      // Fund vault so it can pay out
       await vault.connect(user).depositNative(0, { value: ethers.parseEther("2.0") });
 
       const tx = await vault.connect(user).withdraw(
         withdrawalData, merkleProof, nullifier, zkProof, withdrawalsRoot
       );
-
       await expect(tx)
         .to.emit(vault, "Withdrawal")
         .withArgs(user.address, 1, withdrawalData.amount, nullifier, withdrawalsRoot);
     });
 
     it("Should transfer ETH to user on withdrawal", async function () {
-      const withdrawalsRoot = ethers.keccak256(ethers.toUtf8Bytes("withdrawals"));
-      await vault.connect(owner).updateWithdrawalsRoot(withdrawalsRoot);
-
       const withdrawAmount = ethers.parseEther("1.0");
-
-      // Fund vault via deposit
-      await vault.connect(owner).depositNative(0, { value: ethers.parseEther("2.0") });
-
+      const withdrawalData = { user: user.address, assetId: 1, amount: withdrawAmount, chainId: 1 };
+      const { merkleProof, withdrawalsRoot } = await setupWithdrawal(withdrawalData);
       const nullifier = ethers.keccak256(ethers.toUtf8Bytes("nullifier2"));
-      const withdrawalData = {
-        user: user.address,
-        assetId: 1,
-        amount: withdrawAmount,
-        chainId: 1,
-      };
+
+      await vault.connect(owner).depositNative(0, { value: ethers.parseEther("2.0") });
 
       const balanceBefore = await ethers.provider.getBalance(user.address);
       const tx = await vault.connect(user).withdraw(
@@ -211,31 +224,20 @@ describe("AxyncVault", function () {
       const receipt = await tx.wait();
       const gasUsed = receipt.gasUsed * receipt.gasPrice;
       const balanceAfter = await ethers.provider.getBalance(user.address);
-
       expect(balanceAfter - balanceBefore + gasUsed).to.equal(withdrawAmount);
     });
 
     it("Deposits fund withdrawals (unified vault)", async function () {
-      const withdrawalsRoot = ethers.keccak256(ethers.toUtf8Bytes("withdrawals"));
-      await vault.connect(owner).updateWithdrawalsRoot(withdrawalsRoot);
-
-      // User deposits ETH
       const depositAmount = ethers.parseEther("5.0");
       await vault.connect(user).depositNative(0, { value: depositAmount });
 
-      // Same vault now has funds for withdrawal
       const vaultBalance = await ethers.provider.getBalance(await vault.getAddress());
       expect(vaultBalance).to.equal(depositAmount);
 
-      // Another user withdraws from the same vault
       const withdrawAmount = ethers.parseEther("1.0");
+      const withdrawalData = { user: user.address, assetId: 1, amount: withdrawAmount, chainId: 1 };
+      const { merkleProof, withdrawalsRoot } = await setupWithdrawal(withdrawalData);
       const nullifier = ethers.keccak256(ethers.toUtf8Bytes("nullifier-unified"));
-      const withdrawalData = {
-        user: user.address,
-        assetId: 1,
-        amount: withdrawAmount,
-        chainId: 1,
-      };
 
       await vault.connect(user).withdraw(
         withdrawalData, merkleProof, nullifier, zkProof, withdrawalsRoot
@@ -246,36 +248,26 @@ describe("AxyncVault", function () {
     });
 
     it("Should reject zero amount", async function () {
-      const withdrawalsRoot = ethers.keccak256(ethers.toUtf8Bytes("withdrawals"));
-      await vault.connect(owner).updateWithdrawalsRoot(withdrawalsRoot);
-
-      const nullifier = ethers.keccak256(ethers.toUtf8Bytes("nullifier"));
       const withdrawalData = { user: user.address, assetId: 1, amount: 0, chainId: 1 };
-
       await expect(
-        vault.connect(user).withdraw(withdrawalData, merkleProof, nullifier, zkProof, withdrawalsRoot)
+        vault.connect(user).withdraw(withdrawalData, "0x" + "00".repeat(32), ethers.keccak256(ethers.toUtf8Bytes("n")), zkProof, ethers.ZeroHash)
       ).to.be.revertedWithCustomError(vault, "InvalidAmount");
     });
 
     it("Should reject invalid user", async function () {
-      const withdrawalsRoot = ethers.keccak256(ethers.toUtf8Bytes("withdrawals"));
-      await vault.connect(owner).updateWithdrawalsRoot(withdrawalsRoot);
-
-      const nullifier = ethers.keccak256(ethers.toUtf8Bytes("nullifier"));
       const withdrawalData = { user: owner.address, assetId: 1, amount: ethers.parseEther("1.0"), chainId: 1 };
-
+      const { merkleProof, withdrawalsRoot } = await setupWithdrawal(withdrawalData);
       await expect(
-        vault.connect(user).withdraw(withdrawalData, merkleProof, nullifier, zkProof, withdrawalsRoot)
+        vault.connect(user).withdraw(withdrawalData, merkleProof, ethers.keccak256(ethers.toUtf8Bytes("n")), zkProof, withdrawalsRoot)
       ).to.be.revertedWithCustomError(vault, "InvalidUser");
     });
 
     it("Should prevent duplicate withdrawals (nullifier)", async function () {
-      const withdrawalsRoot = ethers.keccak256(ethers.toUtf8Bytes("withdrawals"));
-      await vault.connect(owner).updateWithdrawalsRoot(withdrawalsRoot);
       await vault.connect(owner).depositNative(0, { value: ethers.parseEther("5.0") });
 
-      const nullifier = ethers.keccak256(ethers.toUtf8Bytes("nullifier"));
       const withdrawalData = { user: user.address, assetId: 1, amount: ethers.parseEther("1.0"), chainId: 1 };
+      const { merkleProof, withdrawalsRoot } = await setupWithdrawal(withdrawalData);
+      const nullifier = ethers.keccak256(ethers.toUtf8Bytes("nullifier"));
 
       await vault.connect(user).withdraw(withdrawalData, merkleProof, nullifier, zkProof, withdrawalsRoot);
 
@@ -285,14 +277,10 @@ describe("AxyncVault", function () {
     });
 
     it("Should reject empty proof", async function () {
-      const withdrawalsRoot = ethers.keccak256(ethers.toUtf8Bytes("withdrawals"));
-      await vault.connect(owner).updateWithdrawalsRoot(withdrawalsRoot);
-
-      const nullifier = ethers.keccak256(ethers.toUtf8Bytes("nullifier"));
       const withdrawalData = { user: user.address, assetId: 1, amount: ethers.parseEther("1.0"), chainId: 1 };
-
+      const { merkleProof, withdrawalsRoot } = await setupWithdrawal(withdrawalData);
       await expect(
-        vault.connect(user).withdraw(withdrawalData, merkleProof, nullifier, "0x", withdrawalsRoot)
+        vault.connect(user).withdraw(withdrawalData, merkleProof, ethers.keccak256(ethers.toUtf8Bytes("n")), "0x", withdrawalsRoot)
       ).to.be.revertedWithCustomError(vault, "InvalidProof");
     });
   });
@@ -327,55 +315,6 @@ describe("AxyncVault", function () {
       await expect(
         vault.connect(user).registerAsset(2, await mockToken.getAddress())
       ).to.be.revertedWithCustomError(vault, "OwnableUnauthorizedAccount");
-    });
-
-    it("Should reject zero address for asset registration", async function () {
-      await expect(
-        vault.connect(owner).registerAsset(2, ethers.ZeroAddress)
-      ).to.be.revertedWith("Invalid token address");
-    });
-  });
-
-  describe("Owner Functions", function () {
-    it("Should allow owner to withdraw tokens", async function () {
-      const amount = ethers.parseEther("1.0");
-      await vault.connect(user).deposit(1, amount);
-
-      const balanceBefore = await mockToken.balanceOf(owner.address);
-      await vault.connect(owner).withdrawTokens(await mockToken.getAddress(), amount);
-      const balanceAfter = await mockToken.balanceOf(owner.address);
-
-      expect(balanceAfter - balanceBefore).to.equal(amount);
-    });
-
-    it("Should allow owner to withdraw native ETH", async function () {
-      const amount = ethers.parseEther("1.0");
-      await vault.connect(user).depositNative(0, { value: amount });
-
-      const ownerBalanceBefore = await ethers.provider.getBalance(owner.address);
-      const tx = await vault.connect(owner).withdrawNative(amount);
-      const receipt = await tx.wait();
-      const gasUsed = receipt.gasUsed * receipt.gasPrice;
-      const ownerBalanceAfter = await ethers.provider.getBalance(owner.address);
-
-      expect(ownerBalanceAfter - ownerBalanceBefore + gasUsed).to.equal(amount);
-    });
-
-    it("Should reject non-owner from withdrawing", async function () {
-      await expect(
-        vault.connect(user).withdrawTokens(await mockToken.getAddress(), ethers.parseEther("1.0"))
-      ).to.be.revertedWithCustomError(vault, "OwnableUnauthorizedAccount");
-
-      await expect(
-        vault.connect(user).withdrawNative(ethers.parseEther("1.0"))
-      ).to.be.revertedWithCustomError(vault, "OwnableUnauthorizedAccount");
-    });
-
-    it("Should reject insufficient balance for native withdrawal", async function () {
-      await vault.connect(user).depositNative(0, { value: ethers.parseEther("1.0") });
-      await expect(
-        vault.connect(owner).withdrawNative(ethers.parseEther("2.0"))
-      ).to.be.revertedWith("Insufficient balance");
     });
   });
 

@@ -13,9 +13,9 @@ describe("On-Chain Verification", function () {
     const groth16Verifier = await Groth16Verifier.deploy();
     await groth16Verifier.waitForDeployment();
 
-    const VerifierContract = await ethers.getContractFactory("VerifierContract");
+    const AxyncVerifier = await ethers.getContractFactory("AxyncVerifier");
     const initialStateRoot = ethers.ZeroHash;
-    const verifierContract = await VerifierContract.deploy(
+    const verifierContract = await AxyncVerifier.deploy(
       sequencer.address,
       initialStateRoot,
       owner.address,

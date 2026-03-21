@@ -14,7 +14,7 @@ async function main() {
   console.log("\nContract Addresses:");
   console.log("  DepositContract:", deployment.depositAddress);
   console.log("  Groth16Verifier:", deployment.groth16VerifierAddress);
-  console.log("  VerifierContract:", deployment.verifierAddress);
+  console.log("  AxyncVerifier:", deployment.verifierAddress);
   console.log("  WithdrawalContract:", deployment.withdrawalAddress);
 
   console.log("\n=== Next Steps ===");

@@ -37,10 +37,10 @@ async function deployContracts() {
   const groth16VerifierAddress = await groth16Verifier.getAddress();
   console.log("Groth16Verifier deployed to:", groth16VerifierAddress);
 
-  // Deploy VerifierContract
-  const VerifierContract = await hre.ethers.getContractFactory("VerifierContract");
+  // Deploy AxyncVerifier
+  const AxyncVerifier = await hre.ethers.getContractFactory("AxyncVerifier");
   const initialStateRoot = hre.ethers.ZeroHash; // Will be updated after first block
-  const verifierContract = await VerifierContract.deploy(
+  const verifierContract = await AxyncVerifier.deploy(
     deployer.address, // sequencer
     initialStateRoot,
     deployer.address, // owner
@@ -48,7 +48,7 @@ async function deployContracts() {
   );
   await verifierContract.waitForDeployment();
   const verifierAddress = await verifierContract.getAddress();
-  console.log("VerifierContract deployed to:", verifierAddress);
+  console.log("AxyncVerifier deployed to:", verifierAddress);
 
   // Deploy AxyncVault (unified deposit + withdrawal)
   const AxyncVault = await hre.ethers.getContractFactory("AxyncVault");
@@ -57,10 +57,10 @@ async function deployContracts() {
   const vaultAddress = await vault.getAddress();
   console.log("AxyncVault deployed to:", vaultAddress);
 
-  // Set AxyncVault address on VerifierContract for access control
+  // Set AxyncVault address on AxyncVerifier for access control
   const setVaultTx = await verifierContract.setVaultContract(vaultAddress);
   await setVaultTx.wait();
-  console.log("VerifierContract: AxyncVault address set to:", vaultAddress);
+  console.log("AxyncVerifier: AxyncVault address set to:", vaultAddress);
 
   return {
     chainId,
@@ -115,7 +115,7 @@ async function verifyContracts(deployment) {
       constructorArguments: [deployment.deployer, initialStateRoot, deployment.deployer, deployment.groth16VerifierAddress],
     });
   } catch (error) {
-    console.log("Error verifying VerifierContract:", error.message);
+    console.log("Error verifying AxyncVerifier:", error.message);
   }
 
   try {
