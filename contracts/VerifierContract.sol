@@ -38,6 +38,9 @@ contract VerifierContract is Ownable, ReentrancyGuard {
     /// Authorized AxyncVault address
     address public vaultContract;
 
+    /// Authorized NftMarketplace address
+    address public marketplaceContract;
+
     error InvalidSequencerAddress();
     error OnlySequencer();
     error OnlyVaultContract();
@@ -219,7 +222,7 @@ contract VerifierContract is Ownable, ReentrancyGuard {
      * @param nullifier Nullifier to mark as used
      */
     function markNullifierUsed(bytes32 nullifier) external {
-        if (msg.sender != vaultContract) revert OnlyVaultContract();
+        if (msg.sender != vaultContract && msg.sender != marketplaceContract) revert OnlyVaultContract();
         nullifiers[nullifier] = true;
     }
 
@@ -230,6 +233,15 @@ contract VerifierContract is Ownable, ReentrancyGuard {
     function setVaultContract(address _vaultContract) external onlyOwner {
         if (_vaultContract == address(0)) revert InvalidAddress();
         vaultContract = _vaultContract;
+    }
+
+    /**
+     * @notice Set the authorized NftMarketplace address
+     * @param _marketplaceContract Address of the NftMarketplace
+     */
+    function setMarketplaceContract(address _marketplaceContract) external onlyOwner {
+        if (_marketplaceContract == address(0)) revert InvalidAddress();
+        marketplaceContract = _marketplaceContract;
     }
 
     /**
