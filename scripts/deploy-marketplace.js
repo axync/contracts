@@ -1,5 +1,5 @@
 /**
- * Deploy NftMarketplace + ERC721Mock to both Sepolia and Base Sepolia
+ * Deploy AxyncEscrow + ERC721Mock to both Sepolia and Base Sepolia
  *
  * Usage:
  *   npx hardhat run scripts/deploy-marketplace.js
@@ -36,37 +36,37 @@ async function deployToChain(chainName, rpcUrl, verifierAddr) {
     throw new Error(`No balance on ${chainName}!`);
   }
 
-  // Deploy NftMarketplace
-  const MarketplaceArtifact = JSON.parse(
-    fs.readFileSync("./artifacts/contracts/NftMarketplace.sol/NftMarketplace.json")
+  // Deploy AxyncEscrow
+  const EscrowArtifact = JSON.parse(
+    fs.readFileSync("./artifacts/contracts/AxyncEscrow.sol/AxyncEscrow.json")
   );
 
-  console.log(`\nDeploying NftMarketplace (fee: ${FEE_BPS / 100}%, timeout: 7 days)...`);
-  const MarketplaceFactory = new ethers.ContractFactory(
-    MarketplaceArtifact.abi,
-    MarketplaceArtifact.bytecode,
+  console.log(`\nDeploying AxyncEscrow (fee: ${FEE_BPS / 100}%, timeout: 7 days)...`);
+  const EscrowFactory = new ethers.ContractFactory(
+    EscrowArtifact.abi,
+    EscrowArtifact.bytecode,
     wallet
   );
 
-  const marketplace = await MarketplaceFactory.deploy(
+  const escrowContract = await EscrowFactory.deploy(
     verifierAddr,
     FEE_BPS,
     wallet.address,      // fee recipient
     EMERGENCY_TIMEOUT,
     wallet.address       // owner
   );
-  await marketplace.waitForDeployment();
-  const marketplaceAddr = await marketplace.getAddress();
-  console.log(`NftMarketplace: ${marketplaceAddr}`);
+  await escrowContract.waitForDeployment();
+  const escrowAddr = await escrowContract.getAddress();
+  console.log(`AxyncEscrow: ${escrowAddr}`);
 
-  // Register marketplace in VerifierContract
+  // Register escrow in AxyncVerifier
   const VerifierArtifact = JSON.parse(
-    fs.readFileSync("./artifacts/contracts/VerifierContract.sol/VerifierContract.json")
+    fs.readFileSync("./artifacts/contracts/AxyncVerifier.sol/AxyncVerifier.json")
   );
   const verifier = new ethers.Contract(verifierAddr, VerifierArtifact.abi, wallet);
 
-  console.log("Setting marketplace in VerifierContract...");
-  const tx = await verifier.setMarketplaceContract(marketplaceAddr);
+  console.log("Setting escrow contract in AxyncVerifier...");
+  const tx = await verifier.setEscrowContract(escrowAddr);
   await tx.wait();
   console.log("Done");
 
@@ -95,14 +95,14 @@ async function deployToChain(chainName, rpcUrl, verifierAddr) {
 
   return {
     chainName,
-    marketplace: marketplaceAddr,
+    escrow: escrowAddr,
     erc721Mock: mockAddr,
     verifier: verifierAddr,
   };
 }
 
 async function main() {
-  console.log("Axync NftMarketplace Deployment\n");
+  console.log("Axync AxyncEscrow Deployment\n");
 
   console.log("Compiling contracts...");
   await hre.run("compile");
@@ -136,13 +136,13 @@ async function main() {
   console.log("DEPLOYMENT SUMMARY");
   console.log("=".repeat(60));
   console.log(`\nEthereum Sepolia:`);
-  console.log(`  NftMarketplace: ${sepolia.marketplace}`);
-  console.log(`  ERC721Mock:     ${sepolia.erc721Mock}`);
-  console.log(`  Verifier:       ${sepolia.verifier}`);
+  console.log(`  AxyncEscrow: ${sepolia.escrow}`);
+  console.log(`  ERC721Mock:  ${sepolia.erc721Mock}`);
+  console.log(`  Verifier:    ${sepolia.verifier}`);
   console.log(`\nBase Sepolia:`);
-  console.log(`  NftMarketplace: ${baseSepolia.marketplace}`);
-  console.log(`  ERC721Mock:     ${baseSepolia.erc721Mock}`);
-  console.log(`  Verifier:       ${baseSepolia.verifier}`);
+  console.log(`  AxyncEscrow: ${baseSepolia.escrow}`);
+  console.log(`  ERC721Mock:  ${baseSepolia.erc721Mock}`);
+  console.log(`  Verifier:    ${baseSepolia.verifier}`);
 }
 
 main()

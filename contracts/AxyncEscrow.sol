@@ -4,15 +4,15 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "./VerifierContract.sol";
+import "./AxyncVerifier.sol";
 
 /**
- * @title NftMarketplace
- * @notice Cross-chain NFT marketplace powered by Axync sequencer + ZK proofs
+ * @title AxyncEscrow
+ * @notice Cross-chain escrow for vesting positions powered by Axync sequencer + ZK proofs
  * @dev NFT stays in escrow on source chain. Payment flows through Axync sequencer.
  *      After block proof, buyer claims NFT via merkle proof against withdrawalsRoot.
  */
-contract NftMarketplace is Ownable, ReentrancyGuard {
+contract AxyncEscrow is Ownable, ReentrancyGuard {
     // ── Types ──
 
     enum ListingStatus {
@@ -62,7 +62,10 @@ contract NftMarketplace is Ownable, ReentrancyGuard {
     uint256 public feeBps;        // basis points (100 = 1%)
     address public feeRecipient;
 
-    VerifierContract public verifier;
+    AxyncVerifier public verifier;
+
+    /// Withdrawals root (set by relayer after block proof submission)
+    bytes32 public withdrawalsRoot;
 
     /// Emergency cancel timeout (seconds after listing)
     uint256 public emergencyTimeout;
@@ -80,6 +83,7 @@ contract NftMarketplace is Ownable, ReentrancyGuard {
     error InvalidMerkleProof();
     error TimeoutNotReached();
     error InvalidBuyer();
+    error InvalidWithdrawalsRoot();
 
     // ── Constructor ──
 
@@ -93,7 +97,7 @@ contract NftMarketplace is Ownable, ReentrancyGuard {
         if (_verifier == address(0)) revert InvalidVerifier();
         if (_feeBps > 1000) revert FeeTooHigh(); // max 10%
 
-        verifier = VerifierContract(_verifier);
+        verifier = AxyncVerifier(_verifier);
         feeBps = _feeBps;
         feeRecipient = _feeRecipient;
         emergencyTimeout = _emergencyTimeout;
@@ -164,7 +168,7 @@ contract NftMarketplace is Ownable, ReentrancyGuard {
      * @notice Claim NFT after purchase was settled by Axync sequencer
      * @param listingId Listing ID
      * @param buyer Buyer address (must match what sequencer recorded)
-     * @param merkleProof Merkle proof that this NFT release is in withdrawalsRoot
+     * @param merkleProof Merkle proof path (32-byte sibling hashes concatenated)
      * @param nullifier Unique nullifier to prevent double-claim
      */
     function claimNft(
@@ -181,7 +185,7 @@ contract NftMarketplace is Ownable, ReentrancyGuard {
         // Check nullifier not already used
         if (verifier.isNullifierUsed(nullifier)) revert NullifierAlreadyUsed();
 
-        // Verify merkle proof: leaf = hash(nftContract, tokenId, buyer, chainId, listingId)
+        // Verify merkle proof: leaf = keccak256(nftContract, tokenId, buyer, chainId, listingId)
         bytes32 leaf = keccak256(
             abi.encodePacked(
                 l.nftContract,
@@ -192,9 +196,9 @@ contract NftMarketplace is Ownable, ReentrancyGuard {
             )
         );
 
-        // Verify against current withdrawalsRoot from AxyncVault (set by relayer)
-        // We read withdrawalsRoot from the vault contract linked to verifier
-        if (!_verifyMerkleProof(leaf, merkleProof)) {
+        // Verify against withdrawalsRoot (set by relayer)
+        if (withdrawalsRoot == bytes32(0)) revert InvalidWithdrawalsRoot();
+        if (!_verifyMerkleProof(leaf, merkleProof, withdrawalsRoot)) {
             revert InvalidMerkleProof();
         }
 
@@ -250,11 +254,23 @@ contract NftMarketplace is Ownable, ReentrancyGuard {
 
     function setVerifier(address _verifier) external onlyOwner {
         if (_verifier == address(0)) revert InvalidVerifier();
-        verifier = VerifierContract(_verifier);
+        verifier = AxyncVerifier(_verifier);
     }
 
     function setEmergencyTimeout(uint256 _timeout) external onlyOwner {
         emergencyTimeout = _timeout;
+    }
+
+    /**
+     * @notice Update withdrawals root (called by relayer after block proof submission)
+     * @param _withdrawalsRoot New withdrawals root from the latest block
+     */
+    function updateWithdrawalsRoot(bytes32 _withdrawalsRoot) external onlyOwner {
+        withdrawalsRoot = _withdrawalsRoot;
+    }
+
+    function getWithdrawalsRoot() external view returns (bytes32) {
+        return withdrawalsRoot;
     }
 
     // ══════════════════════════════════════════════
@@ -273,17 +289,35 @@ contract NftMarketplace is Ownable, ReentrancyGuard {
     // ██  INTERNAL
     // ══════════════════════════════════════════════
 
+    /**
+     * @notice Verify merkle proof against a root
+     * @param leaf Leaf hash to verify
+     * @param proof Concatenated 32-byte sibling hashes (bottom to top)
+     * @param root Expected merkle root
+     * @return true if proof is valid
+     */
     function _verifyMerkleProof(
         bytes32 leaf,
-        bytes calldata merkleProof
+        bytes calldata proof,
+        bytes32 root
     ) internal pure returns (bool) {
-        if (merkleProof.length == 0) return false;
+        if (proof.length == 0) return false;
+        if (proof.length % 32 != 0) return false;
         if (leaf == bytes32(0)) return false;
 
-        // Placeholder: accept non-empty proof with valid leaf
-        // In production: walk merkle path and verify against withdrawalsRoot
-        bytes32 proofHash = keccak256(abi.encodePacked(merkleProof, leaf));
-        return proofHash != bytes32(0);
+        bytes32 computedHash = leaf;
+        uint256 proofLength = proof.length / 32;
+
+        for (uint256 i = 0; i < proofLength; i++) {
+            bytes32 sibling = bytes32(proof[i * 32:(i + 1) * 32]);
+            if (computedHash <= sibling) {
+                computedHash = keccak256(abi.encodePacked(computedHash, sibling));
+            } else {
+                computedHash = keccak256(abi.encodePacked(sibling, computedHash));
+            }
+        }
+
+        return computedHash == root;
     }
 
     /**

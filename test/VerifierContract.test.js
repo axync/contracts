@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("VerifierContract", function () {
+describe("AxyncVerifier", function () {
   let verifierContract;
   let groth16Verifier;
   let deployer;
@@ -15,11 +15,11 @@ describe("VerifierContract", function () {
     groth16Verifier = await Groth16Verifier.deploy();
     await groth16Verifier.waitForDeployment();
 
-    // Deploy VerifierContract with zero address for groth16Verifier to use placeholder
+    // Deploy AxyncVerifier with zero address for groth16Verifier to use placeholder
     // Or deploy with groth16Verifier but it won't have verifying key set
-    const VerifierContract = await ethers.getContractFactory("VerifierContract");
+    const AxyncVerifier = await ethers.getContractFactory("AxyncVerifier");
     const initialStateRoot = ethers.ZeroHash;
-    verifierContract = await VerifierContract.deploy(
+    verifierContract = await AxyncVerifier.deploy(
       sequencer.address,
       initialStateRoot,
       deployer.address,
@@ -185,7 +185,7 @@ describe("VerifierContract", function () {
 
       await expect(
         verifierContract.connect(sequencer).markNullifierUsed(nullifier)
-      ).to.be.revertedWithCustomError(verifierContract, "OnlyVaultContract");
+      ).to.be.revertedWithCustomError(verifierContract, "OnlyAuthorizedContract");
     });
   });
 

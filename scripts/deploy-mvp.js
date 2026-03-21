@@ -32,11 +32,11 @@ async function deployToChain(chainName, rpcUrl, chainId) {
   }
 
   // Read compiled artifacts
-  const VerifierArtifact = JSON.parse(fs.readFileSync("./artifacts/contracts/VerifierContract.sol/VerifierContract.json"));
+  const VerifierArtifact = JSON.parse(fs.readFileSync("./artifacts/contracts/AxyncVerifier.sol/AxyncVerifier.json"));
   const VaultArtifact = JSON.parse(fs.readFileSync("./artifacts/contracts/AxyncVault.sol/AxyncVault.json"));
 
-  // 1. Deploy VerifierContract (NO groth16 verifier - use placeholder)
-  console.log("\n1. Deploying VerifierContract (placeholder mode)...");
+  // 1. Deploy AxyncVerifier (NO groth16 verifier - use placeholder)
+  console.log("\n1. Deploying AxyncVerifier (placeholder mode)...");
   const VerifierFactory = new ethers.ContractFactory(VerifierArtifact.abi, VerifierArtifact.bytecode, wallet);
   const verifier = await VerifierFactory.deploy(
     wallet.address,                    // sequencer = deployer
@@ -46,7 +46,7 @@ async function deployToChain(chainName, rpcUrl, chainId) {
   );
   await verifier.waitForDeployment();
   const verifierAddr = await verifier.getAddress();
-  console.log(`   VerifierContract: ${verifierAddr}`);
+  console.log(`   AxyncVerifier: ${verifierAddr}`);
 
   // 2. Deploy AxyncVault (unified deposit + withdrawal)
   console.log("2. Deploying AxyncVault...");
@@ -56,8 +56,8 @@ async function deployToChain(chainName, rpcUrl, chainId) {
   const vaultAddr = await vault.getAddress();
   console.log(`   AxyncVault: ${vaultAddr}`);
 
-  // 3. Link AxyncVault in VerifierContract
-  console.log("3. Linking AxyncVault to VerifierContract...");
+  // 3. Link AxyncVault in AxyncVerifier
+  console.log("3. Linking AxyncVault to AxyncVerifier...");
   const setVaultTx = await verifier.setVaultContract(vaultAddr);
   await setVaultTx.wait();
   console.log("   Linked");

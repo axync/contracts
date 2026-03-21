@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "./VerifierContract.sol";
+import "./AxyncVerifier.sol";
 
 struct WithdrawalData {
     address user;
@@ -50,7 +50,7 @@ contract AxyncVault is Ownable, ReentrancyGuard {
     mapping(bytes32 => bool) public processedDeposits;
 
     /// Verifier contract for state root and nullifier checks
-    VerifierContract public verifier;
+    AxyncVerifier public verifier;
 
     /// Current withdrawals root from latest block
     bytes32 public withdrawalsRoot;
@@ -76,7 +76,7 @@ contract AxyncVault is Ownable, ReentrancyGuard {
 
     constructor(address _verifier, address _owner) Ownable(_owner) {
         if (_verifier == address(0)) revert InvalidVerifierAddress();
-        verifier = VerifierContract(_verifier);
+        verifier = AxyncVerifier(_verifier);
     }
 
     // ══════════════════════════════════════════════
@@ -147,7 +147,7 @@ contract AxyncVault is Ownable, ReentrancyGuard {
         if (nullifier == bytes32(0)) revert InvalidProof();
         if (zkProof.length == 0) revert InvalidProof();
 
-        VerifierContract verifier_ = verifier;
+        AxyncVerifier verifier_ = verifier;
         if (verifier_.isNullifierUsed(nullifier)) revert NullifierAlreadyUsed();
 
         bytes32 currentWithdrawalsRoot = withdrawalsRoot;
@@ -189,7 +189,7 @@ contract AxyncVault is Ownable, ReentrancyGuard {
     function setVerifier(address _verifier) external onlyOwner {
         if (_verifier == address(0)) revert InvalidVerifierAddress();
         address oldVerifier = address(verifier);
-        verifier = VerifierContract(_verifier);
+        verifier = AxyncVerifier(_verifier);
         emit VerifierUpdated(oldVerifier, _verifier);
     }
 
@@ -218,6 +218,7 @@ contract AxyncVault is Ownable, ReentrancyGuard {
         bytes32 root
     ) internal pure returns (bool) {
         if (merkleProof.length == 0) return false;
+        if (merkleProof.length % 32 != 0) return false;
         if (root == bytes32(0)) return false;
 
         bytes32 leaf = keccak256(
@@ -231,10 +232,20 @@ contract AxyncVault is Ownable, ReentrancyGuard {
 
         if (leaf == bytes32(0)) return false;
 
-        bytes32 proofHash = keccak256(abi.encodePacked(merkleProof, root));
-        if (proofHash == bytes32(0)) return false;
+        // Walk merkle proof path
+        bytes32 computedHash = leaf;
+        uint256 proofLength = merkleProof.length / 32;
 
-        return true;
+        for (uint256 i = 0; i < proofLength; i++) {
+            bytes32 sibling = bytes32(merkleProof[i * 32:(i + 1) * 32]);
+            if (computedHash <= sibling) {
+                computedHash = keccak256(abi.encodePacked(computedHash, sibling));
+            } else {
+                computedHash = keccak256(abi.encodePacked(sibling, computedHash));
+            }
+        }
+
+        return computedHash == root;
     }
 
     function verifyWithdrawalProof(
