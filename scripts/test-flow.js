@@ -1,13 +1,5 @@
 /**
- * End-to-end cross-chain flow test:
- * 1. List NFT on AxyncEscrow (Sepolia)
- * 2. Wait for watcher to detect
- * 3. Deposit ETH on AxyncVault (Base Sepolia)
- * 4. Wait for watcher to detect
- * 5. Submit BuyNft TX to sequencer
- * 6. Wait for block + relayer
- * 7. Get merkle proof
- * 8. Claim NFT on AxyncEscrow (Sepolia)
+ * End-to-end cross-chain flow test with EIP-712 signatures
  */
 
 const { ethers } = require("ethers");
@@ -16,22 +8,18 @@ require("dotenv").config();
 
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const API_URL = "http://204.168.130.135:8080";
-const SEPOLIA_RPC = "https://ethereum-sepolia-rpc.publicnode.com";
+const SEPOLIA_RPC = "https://sepolia.drpc.org";
 const BASE_RPC = "https://sepolia.base.org";
 
 const deployment = JSON.parse(fs.readFileSync("deployment-marketplace.json"));
 
 function loadABI(name) {
-  return JSON.parse(
-    fs.readFileSync(`./artifacts/contracts/${name}.sol/${name}.json`)
-  ).abi;
+  return JSON.parse(fs.readFileSync(`./artifacts/contracts/${name}.sol/${name}.json`)).abi;
 }
 
-async function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function pollAPI(path, check, maxAttempts = 30, interval = 3000) {
+async function pollAPI(path, check, maxAttempts = 60, interval = 3000) {
   for (let i = 0; i < maxAttempts; i++) {
     try {
       const res = await fetch(`${API_URL}${path}`);
@@ -43,6 +31,21 @@ async function pollAPI(path, check, maxAttempts = 30, interval = 3000) {
   }
   throw new Error(`Timeout waiting for ${path}`);
 }
+
+// EIP-712 domain matching Rust sequencer
+const EIP712_DOMAIN = {
+  name: "Axync",
+  version: "1",
+};
+
+// BuyNft EIP-712 type
+const BUYNFT_TYPES = {
+  BuyNft: [
+    { name: "from", type: "address" },
+    { name: "nonce", type: "uint64" },
+    { name: "listingId", type: "uint64" },
+  ],
+};
 
 async function main() {
   console.log("=== AXYNC CROSS-CHAIN FLOW TEST ===\n");
@@ -67,13 +70,12 @@ async function main() {
   // ═══════════════════════════════════════
   // STEP 1: List NFT on Sepolia
   // ═══════════════════════════════════════
-  const TOKEN_ID = 0;
-  const PRICE = ethers.parseEther("0.001"); // 0.001 ETH
+  const TOKEN_ID = 4;
+  const PRICE = ethers.parseEther("0.001");
   const PAYMENT_CHAIN = 84532; // Base Sepolia
 
   console.log(`\n── STEP 1: List NFT #${TOKEN_ID} on Sepolia ──`);
 
-  // Check ownership
   const owner = await mock.ownerOf(TOKEN_ID);
   console.log(`Token #${TOKEN_ID} owner: ${owner}`);
   if (owner.toLowerCase() !== sepoliaWallet.address.toLowerCase()) {
@@ -81,26 +83,16 @@ async function main() {
     return;
   }
 
-  // Approve
   console.log("Approving NFT to escrow...");
   let tx = await mock.approve(deployment.sepolia.escrow, TOKEN_ID);
   await tx.wait();
   console.log("Approved ✓");
 
-  // List
   console.log("Listing NFT...");
-  tx = await escrow.list(
-    deployment.sepolia.erc721Mock,
-    TOKEN_ID,
-    PRICE,
-    PAYMENT_CHAIN
-  );
+  tx = await escrow.list(deployment.sepolia.erc721Mock, TOKEN_ID, PRICE, PAYMENT_CHAIN);
   const listReceipt = await tx.wait();
 
-  // Get listing ID from event
-  const listEvent = listReceipt.logs.find(
-    (l) => escrow.interface.parseLog(l)?.name === "NftListed"
-  );
+  const listEvent = listReceipt.logs.find(l => escrow.interface.parseLog(l)?.name === "NftListed");
   const listingId = escrow.interface.parseLog(listEvent).args.listingId;
   console.log(`Listed! On-chain listing ID: ${listingId}`);
 
@@ -111,13 +103,11 @@ async function main() {
 
   const listings = await pollAPI("/api/v1/nft-listings", (data) => {
     return data.listings && data.listings.some(
-      (l) => l.on_chain_listing_id === Number(listingId) && l.status === "Active"
+      l => l.on_chain_listing_id === Number(listingId) && l.status === "Active"
     );
   });
 
-  const seqListing = listings.listings.find(
-    (l) => l.on_chain_listing_id === Number(listingId)
-  );
+  const seqListing = listings.listings.find(l => l.on_chain_listing_id === Number(listingId));
   console.log(`\nWatcher detected! Sequencer listing ID: ${seqListing.id}`);
 
   // ═══════════════════════════════════════
@@ -132,53 +122,54 @@ async function main() {
   // ═══════════════════════════════════════
   // STEP 4: Wait for deposit to be credited
   // ═══════════════════════════════════════
-  console.log("\n── STEP 4: Waiting for deposit to appear in sequencer ──");
+  console.log("\n── STEP 4: Waiting for deposit in sequencer ──");
 
   const account = await pollAPI(
     `/api/v1/account/${sepoliaWallet.address}`,
-    (data) => {
-      // Check if balance exists
-      return data.balances && data.balances.some(
-        (b) => b.amount > 0
-      );
-    },
-    60,
-    2000
+    (data) => data.balances && data.balances.some(b => b.amount > 0),
+    60, 2000
   );
-  console.log(`\nBalance credited in sequencer ✓`);
-  console.log(`Account:`, JSON.stringify(account.balances, null, 2));
+  console.log(`\nBalance credited ✓`);
 
   // ═══════════════════════════════════════
-  // STEP 5: Submit BuyNft TX
+  // STEP 5: Submit BuyNft TX with EIP-712 signature
   // ═══════════════════════════════════════
-  console.log("\n── STEP 5: Submit BuyNft transaction ──");
+  console.log("\n── STEP 5: Submit BuyNft (EIP-712 signed) ──");
 
-  // Get current nonce
+  // Get current nonce from sequencer
   const accountData = await fetch(`${API_URL}/api/v1/account/${sepoliaWallet.address}`).then(r => r.json());
   const nonce = accountData.nonce || 0;
+  console.log(`Sequencer nonce: ${nonce}`);
 
-  const buyTxPayload = {
-    type: "BuyNft",
+  // Sign EIP-712 typed data
+  const buyNftMessage = {
     from: sepoliaWallet.address,
     nonce: nonce,
-    listing_id: seqListing.id,
+    listingId: seqListing.id,
   };
 
-  console.log("Submitting BuyNft TX...");
+  const signature = await sepoliaWallet.signTypedData(EIP712_DOMAIN, BUYNFT_TYPES, buyNftMessage);
+  console.log(`Signature: ${signature.slice(0, 20)}...`);
+
+  // Submit to API
   const submitRes = await fetch(`${API_URL}/api/v1/transactions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buyTxPayload),
+    body: JSON.stringify({
+      kind: "BuyNft",
+      from: sepoliaWallet.address,
+      listing_id: seqListing.id,
+      nonce: nonce,
+      signature: signature,
+    }),
   });
-  const submitData = await submitRes.json();
-  console.log("Submit response:", JSON.stringify(submitData));
+  const submitText = await submitRes.text();
+  console.log(`Submit response (${submitRes.status}): ${submitText}`);
 
   if (!submitRes.ok) {
-    console.log("ERROR: BuyNft submission failed!");
-    console.log("This is expected — BuyNft requires EIP-712 signature.");
-    console.log("The sequencer validates signatures on all user-submitted TXs.");
-    console.log("\nFor full e2e test, we need to sign the TX with EIP-712.");
-    console.log("Listing + Deposit + Watcher parts work correctly ✓");
+    console.log("\n❌ BuyNft submission failed. Debug info:");
+    console.log("Listing:", JSON.stringify(seqListing));
+    console.log("Nonce:", nonce);
     return;
   }
 
@@ -189,9 +180,9 @@ async function main() {
 
   await pollAPI("/api/v1/nft-listings", (data) => {
     return data.listings && data.listings.some(
-      (l) => l.id === seqListing.id && l.status === "Sold"
+      l => l.id === seqListing.id && l.status === "Sold"
     );
-  });
+  }, 30, 2000);
   console.log("Listing sold in sequencer ✓");
 
   // ═══════════════════════════════════════
@@ -214,17 +205,17 @@ async function main() {
     proofData.merkle_proof,
     proofData.nullifier
   );
-  await tx.wait();
-  console.log("NFT claimed! ✓");
+  const claimReceipt = await tx.wait();
+  console.log(`NFT claimed! TX: ${claimReceipt.hash}`);
 
   // Verify
   const newOwner = await mock.ownerOf(TOKEN_ID);
   console.log(`Token #${TOKEN_ID} new owner: ${newOwner}`);
 
-  console.log("\n=== FLOW COMPLETE ===");
+  console.log("\n=== ✅ FULL CROSS-CHAIN FLOW COMPLETE ===");
 }
 
-main().catch((e) => {
-  console.error("\nError:", e.message);
+main().catch(e => {
+  console.error("\nError:", e.message || e);
   process.exit(1);
 });
