@@ -76,7 +76,7 @@ async function main() {
   // ═══════════════════════════════════════
   // STEP 1: List NFT on Sepolia
   // ═══════════════════════════════════════
-  const TOKEN_ID = 1;
+  const TOKEN_ID = 5;
   const PRICE = ethers.parseEther("0.001");
   const PAYMENT_CHAIN = 84532; // Base Sepolia
 
@@ -203,6 +203,21 @@ async function main() {
   // ═══════════════════════════════════════
   // STEP 8: Claim NFT on Sepolia
   // ═══════════════════════════════════════
+  console.log("\n── STEP 7.5: Wait for relayer to submit block proof ──");
+
+  // Wait for withdrawalsRoot to match our leaf (single-leaf tree: root == leaf)
+  const escrowReadOnly = new ethers.Contract(deployment.sepolia.escrow, escrowABI, sepoliaProvider);
+  for (let i = 0; i < 120; i++) {
+    const root = await escrowReadOnly.withdrawalsRoot();
+    if (root === proofData.leaf) {
+      console.log(`\nwithdrawalsRoot matches leaf! ${root.slice(0, 18)}...`);
+      break;
+    }
+    if (i % 10 === 0 && i > 0) console.log(`\n  root: ${root.slice(0,18)}... waiting for ${proofData.leaf.slice(0,18)}...`);
+    process.stdout.write(".");
+    await sleep(3000);
+  }
+
   console.log("\n── STEP 8: Claim NFT on Sepolia (buyer) ──");
 
   // Buyer claims — need to connect escrow with buyer wallet
