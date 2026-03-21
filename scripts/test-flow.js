@@ -6,7 +6,8 @@ const { ethers } = require("ethers");
 const fs = require("fs");
 require("dotenv").config();
 
-const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const SELLER_KEY = process.env.PRIVATE_KEY;
+const BUYER_KEY = "0x37b08ddf875bbba8e770e24c854c8fc561587a1ef55f2fd106472e4fa61138c3";
 const API_URL = "http://204.168.130.135:8080";
 const SEPOLIA_RPC = "https://sepolia.drpc.org";
 const BASE_RPC = "https://sepolia.base.org";
@@ -52,25 +53,30 @@ async function main() {
 
   const sepoliaProvider = new ethers.JsonRpcProvider(SEPOLIA_RPC);
   const baseProvider = new ethers.JsonRpcProvider(BASE_RPC);
-  const sepoliaWallet = new ethers.Wallet(PRIVATE_KEY, sepoliaProvider);
-  const baseWallet = new ethers.Wallet(PRIVATE_KEY, baseProvider);
 
-  console.log(`Wallet: ${sepoliaWallet.address}`);
-  console.log(`Sepolia ETH: ${ethers.formatEther(await sepoliaProvider.getBalance(sepoliaWallet.address))}`);
-  console.log(`Base ETH: ${ethers.formatEther(await baseProvider.getBalance(baseWallet.address))}`);
+  // Seller = deployer (owns NFTs)
+  const sellerSepolia = new ethers.Wallet(SELLER_KEY, sepoliaProvider);
+  // Buyer = separate wallet (deposits on Base, buys NFT)
+  const buyerBase = new ethers.Wallet(BUYER_KEY, baseProvider);
+  const buyerSepolia = new ethers.Wallet(BUYER_KEY, sepoliaProvider);
+
+  console.log(`Seller: ${sellerSepolia.address}`);
+  console.log(`Buyer:  ${buyerBase.address}`);
+  console.log(`Seller Sepolia ETH: ${ethers.formatEther(await sepoliaProvider.getBalance(sellerSepolia.address))}`);
+  console.log(`Buyer Base ETH: ${ethers.formatEther(await baseProvider.getBalance(buyerBase.address))}`);
 
   const escrowABI = loadABI("AxyncEscrow");
   const vaultABI = loadABI("AxyncVault");
   const mockABI = loadABI("ERC721Mock");
 
-  const escrow = new ethers.Contract(deployment.sepolia.escrow, escrowABI, sepoliaWallet);
-  const vault = new ethers.Contract(deployment.baseSepolia.vault, vaultABI, baseWallet);
-  const mock = new ethers.Contract(deployment.sepolia.erc721Mock, mockABI, sepoliaWallet);
+  const escrow = new ethers.Contract(deployment.sepolia.escrow, escrowABI, sellerSepolia);
+  const vault = new ethers.Contract(deployment.baseSepolia.vault, vaultABI, buyerBase);
+  const mock = new ethers.Contract(deployment.sepolia.erc721Mock, mockABI, sellerSepolia);
 
   // ═══════════════════════════════════════
   // STEP 1: List NFT on Sepolia
   // ═══════════════════════════════════════
-  const TOKEN_ID = 4;
+  const TOKEN_ID = 5;
   const PRICE = ethers.parseEther("0.001");
   const PAYMENT_CHAIN = 84532; // Base Sepolia
 
@@ -78,7 +84,7 @@ async function main() {
 
   const owner = await mock.ownerOf(TOKEN_ID);
   console.log(`Token #${TOKEN_ID} owner: ${owner}`);
-  if (owner.toLowerCase() !== sepoliaWallet.address.toLowerCase()) {
+  if (owner.toLowerCase() !== sellerSepolia.address.toLowerCase()) {
     console.log("ERROR: We don't own this token!");
     return;
   }
@@ -125,7 +131,7 @@ async function main() {
   console.log("\n── STEP 4: Waiting for deposit in sequencer ──");
 
   const account = await pollAPI(
-    `/api/v1/account/${sepoliaWallet.address}`,
+    `/api/v1/account/${buyerBase.address}`,
     (data) => data.balances && data.balances.some(b => b.amount > 0),
     60, 2000
   );
@@ -137,18 +143,18 @@ async function main() {
   console.log("\n── STEP 5: Submit BuyNft (EIP-712 signed) ──");
 
   // Get current nonce from sequencer
-  const accountData = await fetch(`${API_URL}/api/v1/account/${sepoliaWallet.address}`).then(r => r.json());
+  const accountData = await fetch(`${API_URL}/api/v1/account/${buyerBase.address}`).then(r => r.json());
   const nonce = accountData.nonce || 0;
-  console.log(`Sequencer nonce: ${nonce}`);
+  console.log(`Buyer sequencer nonce: ${nonce}`);
 
-  // Sign EIP-712 typed data
+  // Sign EIP-712 typed data with buyer key
   const buyNftMessage = {
-    from: sepoliaWallet.address,
+    from: buyerBase.address,
     nonce: nonce,
     listingId: seqListing.id,
   };
 
-  const signature = await sepoliaWallet.signTypedData(EIP712_DOMAIN, BUYNFT_TYPES, buyNftMessage);
+  const signature = await buyerSepolia.signTypedData(EIP712_DOMAIN, BUYNFT_TYPES, buyNftMessage);
   console.log(`Signature: ${signature.slice(0, 20)}...`);
 
   // Submit to API
@@ -157,7 +163,7 @@ async function main() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       kind: "BuyNft",
-      from: sepoliaWallet.address,
+      from: buyerBase.address,
       listing_id: seqListing.id,
       nonce: nonce,
       signature: signature,
@@ -197,9 +203,11 @@ async function main() {
   // ═══════════════════════════════════════
   // STEP 8: Claim NFT on Sepolia
   // ═══════════════════════════════════════
-  console.log("\n── STEP 8: Claim NFT on Sepolia ──");
+  console.log("\n── STEP 8: Claim NFT on Sepolia (buyer) ──");
 
-  tx = await escrow.claimNft(
+  // Buyer claims — need to connect escrow with buyer wallet
+  const escrowAsBuyer = new ethers.Contract(deployment.sepolia.escrow, escrowABI, buyerSepolia);
+  tx = await escrowAsBuyer.claimNft(
     listingId,
     proofData.buyer,
     proofData.merkle_proof,

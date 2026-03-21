@@ -301,9 +301,11 @@ contract AxyncEscrow is Ownable, ReentrancyGuard {
         bytes calldata proof,
         bytes32 root
     ) internal pure returns (bool) {
-        if (proof.length == 0) return false;
-        if (proof.length % 32 != 0) return false;
         if (leaf == bytes32(0)) return false;
+
+        // Single-leaf tree: proof is empty, root == leaf
+        if (proof.length == 0) return leaf == root;
+        if (proof.length % 32 != 0) return false;
 
         bytes32 computedHash = leaf;
         uint256 proofLength = proof.length / 32;

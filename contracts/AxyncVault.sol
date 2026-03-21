@@ -217,8 +217,6 @@ contract AxyncVault is Ownable, ReentrancyGuard {
         bytes calldata merkleProof,
         bytes32 root
     ) internal pure returns (bool) {
-        if (merkleProof.length == 0) return false;
-        if (merkleProof.length % 32 != 0) return false;
         if (root == bytes32(0)) return false;
 
         bytes32 leaf = keccak256(
@@ -231,6 +229,10 @@ contract AxyncVault is Ownable, ReentrancyGuard {
         );
 
         if (leaf == bytes32(0)) return false;
+
+        // Single-leaf tree: proof is empty, root == leaf
+        if (merkleProof.length == 0) return leaf == root;
+        if (merkleProof.length % 32 != 0) return false;
 
         // Walk merkle proof path
         bytes32 computedHash = leaf;
