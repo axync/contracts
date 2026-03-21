@@ -76,7 +76,7 @@ async function main() {
   // ═══════════════════════════════════════
   // STEP 1: List NFT on Sepolia
   // ═══════════════════════════════════════
-  const TOKEN_ID = 5;
+  const TOKEN_ID = 12;
   const PRICE = ethers.parseEther("0.001");
   const PAYMENT_CHAIN = 84532; // Base Sepolia
 
