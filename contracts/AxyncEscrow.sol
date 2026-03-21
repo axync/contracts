@@ -3,17 +3,26 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./AxyncVerifier.sol";
 
 /**
  * @title AxyncEscrow
- * @notice Cross-chain escrow for vesting positions powered by Axync sequencer + ZK proofs
- * @dev NFT stays in escrow on source chain. Payment flows through Axync sequencer.
- *      After block proof, buyer claims NFT via merkle proof against withdrawalsRoot.
+ * @notice Cross-chain escrow for ERC-721 and ERC-20 assets powered by Axync sequencer + ZK proofs
+ * @dev Assets stay in escrow on source chain. Payment flows through Axync sequencer.
+ *      After block proof, buyer claims via merkle proof against withdrawalsRoot.
  */
 contract AxyncEscrow is Ownable, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
     // ── Types ──
+
+    enum AssetType {
+        ERC721,
+        ERC20
+    }
 
     enum ListingStatus {
         Active,
@@ -23,8 +32,10 @@ contract AxyncEscrow is Ownable, ReentrancyGuard {
 
     struct Listing {
         address seller;
-        address nftContract;
-        uint256 tokenId;
+        AssetType assetType;
+        address tokenContract;   // ERC-721 or ERC-20 contract
+        uint256 tokenId;         // ERC-721 only (0 for ERC-20)
+        uint256 amount;          // ERC-20 only (0 for ERC-721)
         uint256 price;           // in payment token (wei for ETH)
         uint256 paymentChainId;  // chain where buyer pays (via AxyncVault)
         ListingStatus status;
@@ -43,9 +54,18 @@ contract AxyncEscrow is Ownable, ReentrancyGuard {
         uint256 paymentChainId
     );
 
-    event NftCancelled(uint256 indexed listingId);
+    event TokenListed(
+        uint256 indexed listingId,
+        address indexed seller,
+        address tokenContract,
+        uint256 amount,
+        uint256 price,
+        uint256 paymentChainId
+    );
 
-    event NftClaimed(
+    event ListingCancelled(uint256 indexed listingId);
+
+    event ListingClaimed(
         uint256 indexed listingId,
         address indexed buyer,
         address indexed seller
@@ -74,6 +94,8 @@ contract AxyncEscrow is Ownable, ReentrancyGuard {
 
     error InvalidPrice();
     error InvalidNFT();
+    error InvalidToken();
+    error InvalidAmount();
     error InvalidVerifier();
     error ListingNotActive();
     error ListingAlreadySold();
@@ -108,11 +130,7 @@ contract AxyncEscrow is Ownable, ReentrancyGuard {
     // ══════════════════════════════════════════════
 
     /**
-     * @notice List an NFT for cross-chain sale
-     * @param nftContract ERC-721 contract address
-     * @param tokenId Token ID
-     * @param price Price in payment token (wei for ETH)
-     * @param paymentChainId Chain ID where buyer pays (via AxyncVault)
+     * @notice List an ERC-721 NFT for cross-chain sale
      */
     function list(
         address nftContract,
@@ -123,14 +141,15 @@ contract AxyncEscrow is Ownable, ReentrancyGuard {
         if (price == 0) revert InvalidPrice();
         if (nftContract == address(0)) revert InvalidNFT();
 
-        // Transfer NFT to escrow
         IERC721(nftContract).transferFrom(msg.sender, address(this), tokenId);
 
         listingId = nextListingId++;
         listings[listingId] = Listing({
             seller: msg.sender,
-            nftContract: nftContract,
+            assetType: AssetType.ERC721,
+            tokenContract: nftContract,
             tokenId: tokenId,
+            amount: 0,
             price: price,
             paymentChainId: paymentChainId,
             status: ListingStatus.Active,
@@ -141,12 +160,44 @@ contract AxyncEscrow is Ownable, ReentrancyGuard {
         emit NftListed(listingId, msg.sender, nftContract, tokenId, price, paymentChainId);
     }
 
+    /**
+     * @notice List ERC-20 tokens for cross-chain sale
+     */
+    function listToken(
+        address tokenContract,
+        uint256 amount,
+        uint256 price,
+        uint256 paymentChainId
+    ) external nonReentrant returns (uint256 listingId) {
+        if (price == 0) revert InvalidPrice();
+        if (tokenContract == address(0)) revert InvalidToken();
+        if (amount == 0) revert InvalidAmount();
+
+        IERC20(tokenContract).safeTransferFrom(msg.sender, address(this), amount);
+
+        listingId = nextListingId++;
+        listings[listingId] = Listing({
+            seller: msg.sender,
+            assetType: AssetType.ERC20,
+            tokenContract: tokenContract,
+            tokenId: 0,
+            amount: amount,
+            price: price,
+            paymentChainId: paymentChainId,
+            status: ListingStatus.Active,
+            buyer: address(0),
+            listedAt: block.timestamp
+        });
+
+        emit TokenListed(listingId, msg.sender, tokenContract, amount, price, paymentChainId);
+    }
+
     // ══════════════════════════════════════════════
     // ██  CANCEL
     // ══════════════════════════════════════════════
 
     /**
-     * @notice Cancel a listing and return NFT to seller
+     * @notice Cancel a listing and return asset to seller
      */
     function cancel(uint256 listingId) external nonReentrant {
         Listing storage l = listings[listingId];
@@ -154,10 +205,9 @@ contract AxyncEscrow is Ownable, ReentrancyGuard {
         if (l.seller != msg.sender) revert NotSeller();
 
         l.status = ListingStatus.Cancelled;
+        _returnAsset(l, msg.sender);
 
-        IERC721(l.nftContract).transferFrom(address(this), msg.sender, l.tokenId);
-
-        emit NftCancelled(listingId);
+        emit ListingCancelled(listingId);
     }
 
     // ══════════════════════════════════════════════
@@ -165,13 +215,13 @@ contract AxyncEscrow is Ownable, ReentrancyGuard {
     // ══════════════════════════════════════════════
 
     /**
-     * @notice Claim NFT after purchase was settled by Axync sequencer
+     * @notice Claim asset after purchase was settled by Axync sequencer
      * @param listingId Listing ID
      * @param buyer Buyer address (must match what sequencer recorded)
      * @param merkleProof Merkle proof path (32-byte sibling hashes concatenated)
      * @param nullifier Unique nullifier to prevent double-claim
      */
-    function claimNft(
+    function claim(
         uint256 listingId,
         address buyer,
         bytes calldata merkleProof,
@@ -182,37 +232,44 @@ contract AxyncEscrow is Ownable, ReentrancyGuard {
         if (buyer == address(0)) revert InvalidBuyer();
         if (nullifier == bytes32(0)) revert InvalidMerkleProof();
 
-        // Check nullifier not already used
         if (verifier.isNullifierUsed(nullifier)) revert NullifierAlreadyUsed();
 
-        // Verify merkle proof: leaf = keccak256(nftContract, tokenId, buyer, chainId, listingId)
-        bytes32 leaf = keccak256(
-            abi.encodePacked(
-                l.nftContract,
-                l.tokenId,
-                buyer,
-                block.chainid,
-                listingId
-            )
-        );
+        // Leaf depends on asset type
+        bytes32 leaf;
+        if (l.assetType == AssetType.ERC721) {
+            leaf = keccak256(abi.encodePacked(l.tokenContract, l.tokenId, buyer, block.chainid, listingId));
+        } else {
+            leaf = keccak256(abi.encodePacked(l.tokenContract, l.amount, buyer, block.chainid, listingId));
+        }
 
-        // Verify against withdrawalsRoot (set by relayer)
         if (withdrawalsRoot == bytes32(0)) revert InvalidWithdrawalsRoot();
         if (!_verifyMerkleProof(leaf, merkleProof, withdrawalsRoot)) {
             revert InvalidMerkleProof();
         }
 
-        // Mark nullifier as used via verifier
         verifier.markNullifierUsed(nullifier);
 
-        // Update listing
         l.status = ListingStatus.Sold;
         l.buyer = buyer;
 
-        // Transfer NFT to buyer
-        IERC721(l.nftContract).transferFrom(address(this), buyer, l.tokenId);
+        // Transfer asset to buyer
+        if (l.assetType == AssetType.ERC721) {
+            IERC721(l.tokenContract).transferFrom(address(this), buyer, l.tokenId);
+        } else {
+            IERC20(l.tokenContract).safeTransfer(buyer, l.amount);
+        }
 
-        emit NftClaimed(listingId, buyer, l.seller);
+        emit ListingClaimed(listingId, buyer, l.seller);
+    }
+
+    /// @notice Backward-compatible alias
+    function claimNft(
+        uint256 listingId,
+        address buyer,
+        bytes calldata merkleProof,
+        bytes32 nullifier
+    ) external {
+        this.claim(listingId, buyer, merkleProof, nullifier);
     }
 
     // ══════════════════════════════════════════════
@@ -221,7 +278,6 @@ contract AxyncEscrow is Ownable, ReentrancyGuard {
 
     /**
      * @notice Emergency cancel after timeout (if sequencer is down)
-     * @param listingId Listing ID
      */
     function emergencyCancel(uint256 listingId) external nonReentrant {
         Listing storage l = listings[listingId];
@@ -230,10 +286,17 @@ contract AxyncEscrow is Ownable, ReentrancyGuard {
         if (block.timestamp < l.listedAt + emergencyTimeout) revert TimeoutNotReached();
 
         l.status = ListingStatus.Cancelled;
-
-        IERC721(l.nftContract).transferFrom(address(this), msg.sender, l.tokenId);
+        _returnAsset(l, msg.sender);
 
         emit EmergencyCancelled(listingId);
+    }
+
+    function _returnAsset(Listing storage l, address to) internal {
+        if (l.assetType == AssetType.ERC721) {
+            IERC721(l.tokenContract).transferFrom(address(this), to, l.tokenId);
+        } else {
+            IERC20(l.tokenContract).safeTransfer(to, l.amount);
+        }
     }
 
     // ══════════════════════════════════════════════
