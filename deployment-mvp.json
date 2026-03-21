@@ -1,18 +1,18 @@
 {
-  "timestamp": "2026-03-21T00:00:00.000Z",
+  "timestamp": "2026-03-21T19:44:22.864Z",
   "deployer": "0x5a2730f477f1a2d916D4740225DfC7c748523346",
   "sepolia": {
     "chainName": "Ethereum Sepolia",
     "chainId": 11155111,
     "deployer": "0x5a2730f477f1a2d916D4740225DfC7c748523346",
     "vault": "0xC0659E7a7b4E81AFe607A7aECd57A7E8E23Ba164",
-    "verifier": "0xf3e753aa9a080cdb901D0a684BD40A8c677CAE32"
+    "verifier": "0xCb1ad501B870ec1A66e8b217e4e38126509DA96E"
   },
   "baseSepolia": {
     "chainName": "Base Sepolia",
     "chainId": 84532,
     "deployer": "0x5a2730f477f1a2d916D4740225DfC7c748523346",
     "vault": "0xE047A68aaB75C479aF21bA34F5fE931c13ed770a",
-    "verifier": "0x58A2ead7996EDE0E9Bc76B231027f52B38A3F472"
+    "verifier": "0xCC1af9d70737a276eB2581Ad2868432E9CEC0498"
   }
 }
