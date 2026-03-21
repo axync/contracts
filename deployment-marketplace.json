@@ -1,0 +1,18 @@
+{
+  "timestamp": "2026-03-21T00:00:00.000Z",
+  "deployer": "0x5a2730f477f1a2d916D4740225DfC7c748523346",
+  "feeBps": 100,
+  "emergencyTimeout": 604800,
+  "sepolia": {
+    "vault": "0xC0659E7a7b4E81AFe607A7aECd57A7E8E23Ba164",
+    "verifier": "0xf3e753aa9a080cdb901D0a684BD40A8c677CAE32",
+    "marketplace": "0xE38c727101962307686D4b350F6F457C173B532f",
+    "erc721Mock": "0xA478911E63591aE6CD6221E084b94207bfAfb430"
+  },
+  "baseSepolia": {
+    "vault": "0xE047A68aaB75C479aF21bA34F5fE931c13ed770a",
+    "verifier": "0x58A2ead7996EDE0E9Bc76B231027f52B38A3F472",
+    "marketplace": "0xa589764039784d46ecF215f49cb742e92Ba09294",
+    "erc721Mock": "0xfefC6AE891c5871dd65cD28899a9052BA4E40BA0"
+  }
+}
