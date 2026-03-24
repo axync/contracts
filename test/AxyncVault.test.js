@@ -68,13 +68,9 @@ describe("AxyncVault", function () {
     await verifierContract.connect(owner).setVaultContract(await vault.getAddress());
 
     const ERC20Mock = await ethers.getContractFactory("ERC20Mock");
-    const mockToken = await ERC20Mock.deploy(
-      "Test Token",
-      "TEST",
-      owner.address,
-      ethers.parseEther("1000000")
-    );
+    const mockToken = await ERC20Mock.deploy();
     await mockToken.waitForDeployment();
+    await mockToken.mint(owner.address, ethers.parseEther("1000000"));
 
     await vault.connect(owner).registerAsset(1, await mockToken.getAddress());
     await mockToken.transfer(user.address, ethers.parseEther("1000"));
